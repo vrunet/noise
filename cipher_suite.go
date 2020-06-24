@@ -10,10 +10,12 @@ import (
 	"hash"
 	"io"
 
+	"github.com/tendermint/ed25519/extra25519"
 	"golang.org/x/crypto/blake2b"
 	"golang.org/x/crypto/blake2s"
 	"golang.org/x/crypto/chacha20poly1305"
 	"golang.org/x/crypto/curve25519"
+	"golang.org/x/crypto/ed25519"
 )
 
 // A DHKey is a keypair used for Diffie-Hellman key agreement.
@@ -104,24 +106,46 @@ var DH25519 DHFunc = dh25519{}
 
 type dh25519 struct{}
 
+// Modified to support the ED25519 Keys
 func (dh25519) GenerateKeypair(rng io.Reader) (DHKey, error) {
-	var pubkey, privkey [32]byte
+	var pubkey, privkey []byte
 	if rng == nil {
 		rng = rand.Reader
 	}
-	if _, err := io.ReadFull(rng, privkey[:]); err != nil {
+
+	pubkey, privkey, err := ed25519.GenerateKey(rng)
+	if err != nil {
 		return DHKey{}, err
 	}
-	curve25519.ScalarBaseMult(&pubkey, &privkey)
+
 	return DHKey{Private: privkey[:], Public: pubkey[:]}, nil
+
 }
 
+// TO make it compatible with the Ed25519 DH, the Edward curve is placed on the Curve25519 and the DH is calculated
 func (dh25519) DH(privkey, pubkey []byte) []byte {
-	var dst, in, base [32]byte
-	copy(in[:], privkey)
-	copy(base[:], pubkey)
-	curve25519.ScalarMult(&dst, &in, &base)
-	return dst[:]
+
+	// Edward key, Private key is 64 bytes
+	var privED *[64]byte
+	var pubED *[32]byte
+
+	// The DH works with 32 byte key
+	var priv, pub *[32]byte
+
+	privED = new([64]byte)
+	copy(privED[:], privkey)
+	pubED = new([32]byte)
+	copy(pubED[:], pubkey)
+
+	priv = new([32]byte)
+	pub = new([32]byte)
+
+	extra25519.PrivateKeyToCurve25519(priv, privED)
+	extra25519.PublicKeyToCurve25519(pub, pubED)
+
+	secretKey, _ := curve25519.X25519(priv[:], pub[:])
+	return secretKey[:]
+
 }
 
 func (dh25519) DHLen() int     { return 32 }
